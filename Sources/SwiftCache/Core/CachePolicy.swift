@@ -1,114 +1,259 @@
+// CachePolicy.swift
+// SwiftCache
+//
+// Created by Muhittin Camdali
+// Copyright © 2025 All rights reserved.
+//
+
 import Foundation
 
-// MARK: - CachePolicy
+// MARK: - Cache Policy
 
-/// Eviction policies that determine which entries are removed
-/// when the cache reaches its capacity limit.
+/// Defines how the cache should handle various scenarios.
 ///
-/// Each policy provides a different trade-off between hit rate,
-/// memory efficiency, and computational overhead.
+/// `CachePolicy` controls cache behavior for reads, writes, and
+/// network operations. Use policies to fine-tune caching behavior
+/// for different use cases.
 ///
-/// ## Choosing a Policy
-///
-/// | Policy | Best For | Overhead |
-/// |--------|----------|----------|
-/// | `.lru`  | General purpose, temporal locality | Low |
-/// | `.lfu`  | Frequency-based access patterns | Medium |
-/// | `.fifo` | Simple insertion-order eviction | Very Low |
-/// | `.ttl`  | Time-sensitive data | Low |
-///
-public enum CachePolicy: String, Sendable, Codable, CaseIterable {
-
-    /// Least Recently Used — evicts the entry that hasn't been accessed
-    /// for the longest time.
+/// ## Example
+/// ```swift
+/// let policy = CachePolicy(
+///     readPolicy: .cacheFirst,
+///     writePolicy: .writeThrough,
+///     stalePolicy: .revalidate
+/// )
+/// ```
+public struct CachePolicy: Sendable, Equatable {
+    
+    /// How to handle read operations.
+    public var readPolicy: ReadPolicy
+    
+    /// How to handle write operations.
+    public var writePolicy: WritePolicy
+    
+    /// How to handle stale data.
+    public var stalePolicy: StalePolicy
+    
+    /// How to handle network failures.
+    public var failurePolicy: FailurePolicy
+    
+    /// Creates a new cache policy.
     ///
-    /// Optimal for workloads with temporal locality where recently
-    /// accessed items are likely to be accessed again soon.
-    case lru
+    /// - Parameters:
+    ///   - readPolicy: Read handling policy.
+    ///   - writePolicy: Write handling policy.
+    ///   - stalePolicy: Stale data handling policy.
+    ///   - failurePolicy: Failure handling policy.
+    public init(
+        readPolicy: ReadPolicy = .cacheFirst,
+        writePolicy: WritePolicy = .writeThrough,
+        stalePolicy: StalePolicy = .revalidate,
+        failurePolicy: FailurePolicy = .returnStale
+    ) {
+        self.readPolicy = readPolicy
+        self.writePolicy = writePolicy
+        self.stalePolicy = stalePolicy
+        self.failurePolicy = failurePolicy
+    }
+    
+    // MARK: - Preset Policies
+    
+    /// Default policy - cache first with write-through.
+    public static let `default` = CachePolicy()
+    
+    /// Aggressive caching - prioritize cache over network.
+    public static let cacheFirst = CachePolicy(
+        readPolicy: .cacheOnly,
+        writePolicy: .writeBack,
+        stalePolicy: .returnStale,
+        failurePolicy: .returnStale
+    )
+    
+    /// Network first - always try network before cache.
+    public static let networkFirst = CachePolicy(
+        readPolicy: .networkFirst,
+        writePolicy: .writeThrough,
+        stalePolicy: .revalidate,
+        failurePolicy: .returnStale
+    )
+    
+    /// No caching - bypass cache entirely.
+    public static let noCache = CachePolicy(
+        readPolicy: .networkOnly,
+        writePolicy: .none,
+        stalePolicy: .reject,
+        failurePolicy: .fail
+    )
+    
+    /// Offline first - prefer cached data for offline support.
+    public static let offlineFirst = CachePolicy(
+        readPolicy: .cacheFirst,
+        writePolicy: .writeBack,
+        stalePolicy: .returnStale,
+        failurePolicy: .returnStale
+    )
+}
 
-    /// Least Frequently Used — evicts the entry with the fewest total accesses.
-    ///
-    /// Best for workloads where access frequency is a strong predictor
-    /// of future accesses. May require more bookkeeping than LRU.
-    case lfu
+// MARK: - Read Policy
 
-    /// First In, First Out — evicts the oldest inserted entry regardless
-    /// of access patterns.
-    ///
-    /// The simplest eviction strategy with minimal overhead. Works well
-    /// when all entries have roughly equal value.
-    case fifo
-
-    /// Time-To-Live — evicts the entry closest to its expiration time.
-    ///
-    /// Prioritizes keeping entries that have the most remaining TTL.
-    /// Ideal for data with well-defined freshness requirements.
-    case ttl
-
-    // MARK: - Description
-
-    /// A human-readable description of this policy.
+/// Defines how read operations should be handled.
+public enum ReadPolicy: String, Sendable, CaseIterable, Codable {
+    /// Check cache first, then network if not found.
+    case cacheFirst
+    
+    /// Check network first, fall back to cache on failure.
+    case networkFirst
+    
+    /// Only read from cache, never from network.
+    case cacheOnly
+    
+    /// Only read from network, never from cache.
+    case networkOnly
+    
+    /// Read from cache and network simultaneously.
+    case parallel
+    
+    /// Description of the policy.
     public var description: String {
         switch self {
-        case .lru:
-            return "Least Recently Used"
-        case .lfu:
-            return "Least Frequently Used"
-        case .fifo:
-            return "First In, First Out"
-        case .ttl:
-            return "Time-To-Live Based"
+        case .cacheFirst:
+            return "Cache First"
+        case .networkFirst:
+            return "Network First"
+        case .cacheOnly:
+            return "Cache Only"
+        case .networkOnly:
+            return "Network Only"
+        case .parallel:
+            return "Parallel"
         }
-    }
-
-    /// Short description suitable for logging.
-    public var shortDescription: String {
-        rawValue.uppercased()
     }
 }
 
-// MARK: - EvictionResult
+// MARK: - Write Policy
 
-/// The result of an eviction operation.
-public struct EvictionResult<Key: Hashable & Sendable>: Sendable {
-
-    /// The keys that were evicted.
-    public let evictedKeys: [Key]
-
-    /// The number of bytes freed by the eviction.
-    public let freedBytes: Int64
-
-    /// The eviction policy that was applied.
-    public let policy: CachePolicy
-
-    /// The time taken to perform the eviction in seconds.
-    public let duration: TimeInterval
-
-    /// Creates a new eviction result.
-    /// - Parameters:
-    ///   - evictedKeys: Keys removed during eviction.
-    ///   - freedBytes: Bytes freed.
-    ///   - policy: The policy used.
-    ///   - duration: Time elapsed during eviction.
-    public init(
-        evictedKeys: [Key],
-        freedBytes: Int64,
-        policy: CachePolicy,
-        duration: TimeInterval
-    ) {
-        self.evictedKeys = evictedKeys
-        self.freedBytes = freedBytes
-        self.policy = policy
-        self.duration = duration
+/// Defines how write operations should be handled.
+public enum WritePolicy: String, Sendable, CaseIterable, Codable {
+    /// Write to cache and persist immediately.
+    case writeThrough
+    
+    /// Write to cache, persist lazily in background.
+    case writeBack
+    
+    /// Write to memory cache only, no persistence.
+    case cacheOnly
+    
+    /// Don't cache at all.
+    case none
+    
+    /// Description of the policy.
+    public var description: String {
+        switch self {
+        case .writeThrough:
+            return "Write Through"
+        case .writeBack:
+            return "Write Back"
+        case .cacheOnly:
+            return "Cache Only"
+        case .none:
+            return "No Caching"
+        }
     }
+}
 
-    /// Whether any entries were actually evicted.
-    public var didEvict: Bool {
-        !evictedKeys.isEmpty
+// MARK: - Stale Policy
+
+/// Defines how stale (expired) data should be handled.
+public enum StalePolicy: String, Sendable, CaseIterable, Codable {
+    /// Return stale data immediately while revalidating.
+    case revalidate
+    
+    /// Return stale data without revalidating.
+    case returnStale
+    
+    /// Reject stale data, treat as cache miss.
+    case reject
+    
+    /// Return stale data with a warning.
+    case warn
+    
+    /// Description of the policy.
+    public var description: String {
+        switch self {
+        case .revalidate:
+            return "Stale While Revalidate"
+        case .returnStale:
+            return "Return Stale"
+        case .reject:
+            return "Reject Stale"
+        case .warn:
+            return "Warn on Stale"
+        }
     }
+}
 
-    /// The number of entries evicted.
-    public var evictedCount: Int {
-        evictedKeys.count
+// MARK: - Failure Policy
+
+/// Defines how failures should be handled.
+public enum FailurePolicy: String, Sendable, CaseIterable, Codable {
+    /// Return stale cached data on failure.
+    case returnStale
+    
+    /// Fail immediately with error.
+    case fail
+    
+    /// Retry the operation.
+    case retry
+    
+    /// Return a default value.
+    case returnDefault
+    
+    /// Description of the policy.
+    public var description: String {
+        switch self {
+        case .returnStale:
+            return "Return Stale on Failure"
+        case .fail:
+            return "Fail Immediately"
+        case .retry:
+            return "Retry"
+        case .returnDefault:
+            return "Return Default"
+        }
+    }
+}
+
+// MARK: - Cache Priority
+
+/// Priority levels for cache operations.
+public enum CachePriority: Int, Sendable, Comparable, CaseIterable, Codable {
+    /// Low priority - may be evicted first.
+    case low = 0
+    
+    /// Normal priority.
+    case normal = 1
+    
+    /// High priority - less likely to be evicted.
+    case high = 2
+    
+    /// Critical - should never be evicted automatically.
+    case critical = 3
+    
+    public static func < (lhs: CachePriority, rhs: CachePriority) -> Bool {
+        lhs.rawValue < rhs.rawValue
+    }
+    
+    /// Description of the priority.
+    public var description: String {
+        switch self {
+        case .low:
+            return "Low"
+        case .normal:
+            return "Normal"
+        case .high:
+            return "High"
+        case .critical:
+            return "Critical"
+        }
     }
 }
