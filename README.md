@@ -19,6 +19,9 @@
 
 <h1 align="center">SwiftCache</h1>
 
+> **Global Search Tags:** Swift LRU cache, iOS caching library, thread-safe cache Swift 6, Swift memory and disk cache, zero-dependency caching.
+
+
 <p align="center">
   <strong>⚡ The fastest, most comprehensive caching framework for Swift</strong>
 </p>
