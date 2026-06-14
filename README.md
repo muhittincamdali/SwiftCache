@@ -19,6 +19,9 @@
 
 <h1 align="center">SwiftCache</h1>
 
+## 🚀 Killer Feature: SQLite Hybrid Disk Adapter
+Memory caching isn't enough. Our engine seamlessly backs your high-speed LRU memory cache with a concurrent, thread-safe SQLite disk adapter, ensuring instant cold-starts for your users.
+
 > **Global Search Tags:** Swift LRU cache, iOS caching library, thread-safe cache Swift 6, Swift memory and disk cache, zero-dependency caching.
 
 
